@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+## Created by drbawb
+## 4chonArchiver
+## Purpose: Archive's a 4chan thread for offline viewing of comments and pictures
+##
+## Input <thread-url> (i.e http://boards.4chan.org/<board>/res/<threadno>)
+## Output: ./<threadno>/<threadno>.txt; <threadno>.jpg;
+##
+##
+## TODO: Maybe archive a browsable offline web page?
+## Uses: hpricot for HTML parsing (because I don't believe in summoning Cthulhu.)
+require 'rubygems'
+require "getoptlong"
+require "open-uri"
+require 'hpricot'
+
+module Archiver
+  class Thread
+    attr_accessor :posts, :thread
+    
+    def initialize(uri)
+      @posts = Array.new
+      @thread = Hpricot(open(uri))
+      
+      ##Get first post and image separately
+      ## We know it's the first image, because you can't post a thread without image
+      ## We also know it's the first blockquote; because that element will show up regardless of blankpost
+      ## There is no other way to determine the firstpost, because it is not contained in any <div>, <table> or <span>
+      firstbody = @thread.search("blockquote")[0].innerHTML
+      firstimage = @thread.at("a[@href*=images.4chan]")
+      firstpost = Post.new()
+      firstpost.body = firstbody
+      firstpost.image = firstimage.get_attribute('href')
+      @posts << firstpost
+      
+      ##Get the rest by looking for td where class == reply
+      @thread.search("td.reply").each do |reply|
+        body = reply.search("blockquote").innerHTML
+        image = reply.at("a[@href*=images.4chan]")
+        post = Post.new()
+        
+        post.body = body
+        post.image = image.get_attribute('href') unless image.nil?
+        
+        @posts << post
+      end
+    end
+    
+    def write(dir)
+      ##Delegate to Post object write
+      i = 0
+      @posts.each do |post|
+        post.write(dir, i)
+        i+=1
+      end
+    end
+  end
+  
+  class Post
+    attr_accessor :image, :body
+    def initialize()
+    end
+    
+    def write(dir, filename)
+      puts "Writing body to #{dir}/#{filename}.txt . . ."
+      File.open(File.join(dir, "#{filename}.txt"), 'w') do |file|
+        file << body
+      end
+      
+      unless image.nil?
+        extension = image.scan(/(\w{3})$/)[0]
+        
+        puts "Writing image to #{dir}/#{filename}.#{extension} . . ."
+        File.open(File.join(dir, "#{filename}.#{extension}"), 'wb') do |file|
+          file << open(image).read
+        end
+      end
+    end
+  end
+  
+end
+
+def help
+  puts "Usage: ArchiverRuby19 [args] <thread-url>"
+  puts "Default arguments: --output ./"
+  puts "Takes a specific thread, and archives its text and images to the output directory"
+  puts "\n Flags: \n"
+  puts "-o / --output Set the output directory (default is ./)"
+  puts "-h / --help This screen."
+end
+
+def check_path(path)
+  ##Error check the given path
+  if !(File.directory? path)
+    puts "Given output location '" + @output + "' is not a directory. Seeing if it exists as file."
+    if File.exist?(path)
+      puts "\nExists as normal file. Please choose a different output directory."
+      exit
+    else
+      puts "\nDoes not exist as file. I'll try to create that directory for you!"
+      begin
+        Dir.mkdir(path)
+      rescue
+        puts "\nSorry, couldn't create the directory for you, try some place else!"
+        exit
+      end
+    end
+  end
+end
+
+def main
+  ##Defaults
+  @output = "./"
+  
+  opts = GetoptLong.new(
+    ['--output', '-o', GetoptLong::OPTIONAL_ARGUMENT],
+    ['--help','-h', GetoptLong::NO_ARGUMENT]
+  )
+  
+  opts.each do |opt, arg|
+    if opt == "--help"
+      help()
+    elsif opt == "--output"
+      check_path(arg)
+      @output = arg
+    else
+      raise ArgumentError
+    end
+  end
+  
+  if ARGV.length == 0
+    help()
+  else
+    uri = ARGV[ARGV.length() - 1]
+  end
+  
+  thread = Archiver::Thread.new(uri)
+  thread.write(@output)
+end
+
+main()
